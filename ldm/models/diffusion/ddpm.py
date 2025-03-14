@@ -1289,13 +1289,25 @@ class LatentDiffusion(DDPM):
 
     def configure_optimizers(self):
         lr = self.learning_rate
-        params = list(self.model.parameters())
-        if self.cond_stage_trainable:
-            print(f"{self.__class__.__name__}: Also optimizing conditioner params!")
-            params = params + list(self.cond_stage_model.parameters())
+        params = []
+        named_params = []
+
+        for name, param in self.model.named_parameters():
+            if "cond_adapter" in name:
+                params.append(param)
+                param_names.append(name)
+                assert param.requires_grad, f"{name} requires grad is False"
+            else:
+                assert not param.requires_grad, f"{name} requires grad is True"
+
         if self.learn_logvar:
             print('Diffusion model optimizing logvar')
             params.append(self.logvar)
+            named_params.append("logvar")
+            assert self.logvar.requires_grad, f"logvar requires grad is False"
+
+        print(f"Optimizing parameters: {param_names}")
+
         opt = torch.optim.AdamW(params, lr=lr)
         if self.use_scheduler:
             assert 'target' in self.scheduler_config
@@ -1328,6 +1340,12 @@ class DiffusionWrapper(pl.LightningModule):
         self.diffusion_model = instantiate_from_config(diff_model_config)
         self.conditioning_key = conditioning_key
         assert self.conditioning_key in [None, 'concat', 'crossattn', 'hybrid', 'adm', 'hybrid-adm', 'crossattn-adm']
+
+        for name, param in self.diffusion_model.named_parameters():
+            if "cond_adapter" in name:
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
 
     def forward(self, x, t, c_concat: list = None, c_crossattn: list = None, c_adm=None):
         if self.conditioning_key is None:
