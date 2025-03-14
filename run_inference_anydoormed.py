@@ -44,39 +44,44 @@ def aug_data_mask(image, mask):
 
 
 def process_pairs(ref_image, ref_mask, tar_image, tar_mask):
+    # ref_image: H_ref x W_ref x 3, numpy.ndarray, [0, 255], uint8
+    # ref_mask: H_ref x W_ref, numpy.ndarray, {0, 1}, uint8, 0 BG, 1 FG
+    # tar_image: H x W x 3, numpy.ndarray, [0, 255], uint8
+    # tar_mask: H x W x 3, numpy.ndarray, {0, 1}, uint8, 0 BG, 1 FG
     # ========= Reference ===========
     # ref expand 
-    ref_box_yyxx = get_bbox_from_mask(ref_mask)
+    ref_box_yyxx = get_bbox_from_mask(ref_mask) # (h_min, h_max, w_min, w_max), tuple
 
     # ref filter mask 
-    ref_mask_3 = np.stack([ref_mask,ref_mask,ref_mask],-1)
-    masked_ref_image = ref_image * ref_mask_3 + np.ones_like(ref_image) * 255 * (1-ref_mask_3)
+    ref_mask_3 = np.stack([ref_mask,ref_mask,ref_mask],-1) # H_ref x W_ref x 3
+    masked_ref_image = ref_image * ref_mask_3 + np.ones_like(ref_image) * 255 * (1-ref_mask_3) # white BG
 
+    # crop reference
     y1,y2,x1,x2 = ref_box_yyxx
     masked_ref_image = masked_ref_image[y1:y2,x1:x2,:]
     ref_mask = ref_mask[y1:y2,x1:x2]
 
-
+    # expand reference image with 255 and mask with 0
     ratio = np.random.randint(12, 13) / 10
     masked_ref_image, ref_mask = expand_image_mask(masked_ref_image, ref_mask, ratio=ratio)
     ref_mask_3 = np.stack([ref_mask,ref_mask,ref_mask],-1)
 
     # to square and resize
-    masked_ref_image = pad_to_square(masked_ref_image, pad_value = 255, random = False)
-    masked_ref_image = cv2.resize(masked_ref_image, (224,224) ).astype(np.uint8)
+    masked_ref_image = pad_to_square(masked_ref_image, pad_value = 255, random = False) # max_expanded_size x max_expanded_size x 3
+    masked_ref_image = cv2.resize(masked_ref_image, (224,224) ).astype(np.uint8) # 224 x 224 x 3
 
-    ref_mask_3 = pad_to_square(ref_mask_3 * 255, pad_value = 0, random = False)
-    ref_mask_3 = cv2.resize(ref_mask_3, (224,224) ).astype(np.uint8)
+    ref_mask_3 = pad_to_square(ref_mask_3 * 255, pad_value = 0, random = False) # max_expanded_size x max_expanded_size x 3, {0, 255}
+    ref_mask_3 = cv2.resize(ref_mask_3, (224,224) ).astype(np.uint8) # 224 x 224 x 3
     ref_mask = ref_mask_3[:,:,0]
 
-    # ref aug 
+    # ref aug is not applied
     masked_ref_image_aug = masked_ref_image #aug_data(masked_ref_image) 
 
     # collage aug 
     masked_ref_image_compose, ref_mask_compose = masked_ref_image, ref_mask #aug_data_mask(masked_ref_image, ref_mask) 
     masked_ref_image_aug = masked_ref_image_compose.copy()
-    ref_mask_3 = np.stack([ref_mask_compose,ref_mask_compose,ref_mask_compose],-1)
-    ref_image_collage = sobel(masked_ref_image_compose, ref_mask_compose/255)
+    ref_mask_3 = np.stack([ref_mask_compose,ref_mask_compose,ref_mask_compose],-1) # 224 x 224 x 3, {0, 255}
+    ref_image_collage = sobel(masked_ref_image_compose, ref_mask_compose/255) # 224 x 224 x 3, uint8, [0, 255]
 
     # ========= Target ===========
     tar_box_yyxx = get_bbox_from_mask(tar_mask)
@@ -91,7 +96,7 @@ def process_pairs(ref_image, ref_mask, tar_image, tar_mask):
     tar_box_yyxx = box_in_box(tar_box_yyxx, tar_box_yyxx_crop)
     y1,y2,x1,x2 = tar_box_yyxx
 
-    # collage
+    # collage with HF map
     ref_image_collage = cv2.resize(ref_image_collage, (x2-x1, y2-y1))
     ref_mask_compose = cv2.resize(ref_mask_compose.astype(np.uint8), (x2-x1, y2-y1))
     ref_mask_compose = (ref_mask_compose > 128).astype(np.uint8)
@@ -214,17 +219,17 @@ def inference_single_image(ref_image, ref_mask, tar_image, tar_mask, guidance_sc
     pred = x_samples[0]
     pred = np.clip(pred,0,255)[1:,:,:]
     sizes = item['extra_sizes']
-    tar_box_yyxx_crop = item['tar_box_yyxx_crop'] 
+    tar_box_yyxx_crop = item['tar_box_yyxx_crop']
+
     gen_image = crop_back(pred, tar_image, sizes, tar_box_yyxx_crop) 
     return gen_image
 
 
 if __name__ == '__main__': 
-    '''
     # ==== Example for inferring a single image ===
     reference_image_path = './examples/TestDreamBooth/FG/01.png'
-    bg_image_path = './examples/TestDreamBooth/BG/000000309203_GT.png'
-    bg_mask_path = './examples/TestDreamBooth/BG/000000309203_mask.png'
+    bg_image_path = './examples/TestDreamBooth/BG/000000047948_GT.png'
+    bg_mask_path = './examples/TestDreamBooth/BG/000000047948_mask.png'
     save_path = './examples/TestDreamBooth/GEN/gen_res.png'
 
     # reference image + reference mask
@@ -252,7 +257,6 @@ if __name__ == '__main__':
     
     cv2.imwrite(save_path, vis_image [:,:,::-1])
     '''
-    #'''
     # ==== Example for inferring VITON-HD Test dataset ===
 
     from omegaconf import OmegaConf
@@ -288,7 +292,7 @@ if __name__ == '__main__':
 
         vis_image = cv2.hconcat([ref_image, gt_image, gen_image])
         cv2.imwrite(gen_path, vis_image[:,:,::-1])
-    #'''
+    '''
 
     
 
