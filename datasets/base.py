@@ -59,13 +59,9 @@ class BaseDataset(Dataset):
 
 
     def __getitem__(self, idx):
-        while(True):
-            try:
-                idx = np.random.randint(0, len(self.data)-1)
-                item = self.get_sample(idx)
-                return item
-            except:
-                idx = np.random.randint(0, len(self.data)-1)
+        idx = np.random.randint(0, len(self.data)-1)
+        item = self.get_sample(idx)
+        return item
                 
     def get_sample(self, idx):
         # Implemented for each specific dataset
@@ -94,16 +90,35 @@ class BaseDataset(Dataset):
     def check_mask_area(self, mask):
         H,W = mask.shape[0], mask.shape[1]
         ratio = mask.sum() / (H * W)
-        if ratio > 0.8 * 0.8  or ratio < 0.1 * 0.1:
-            return False
-        else:
-            return True 
+        return ratio > 0.8 * 0.8  and ratio < 0.1 * 0.1
     
 
-    def process_pairs(self, ref_image, ref_mask, tar_image, tar_mask, max_ratio = 0.8):
-        assert mask_score(ref_mask) > 0.90
-        assert self.check_mask_area(ref_mask) == True
-        assert self.check_mask_area(tar_mask)  == True
+    def process_pairs(
+        self,
+        ref_image: np.ndarray,
+        ref_mask: np.ndarray,
+        tar_image: np.ndarray,
+        tar_mask: np.ndarray,
+        max_ratio: float = 0.8,
+        crop_ratio: float = [1.3, 3.0],
+    ) -> dict:
+        """
+        Process the reference and target images and masks to prepare for training.
+
+        Args:
+            ref_image (np.ndarray): The reference image, size H x W x 3, uint8
+            ref_mask (np.ndarray): The reference mask, size H x W, uint8
+            tar_image (np.ndarray): The target image, size H x W x 3, uint8
+            tar_mask (np.ndarray): The target mask, size H x W, uint8
+            max_ratio (float): The maximum ratio of the target mask area to the reference mask area.
+            crop_ratio (float): Controls the size of the target image crop.
+
+        Returns:
+            dict: A dictionary containing the processed reference and target images and masks.
+        """
+        # assert mask_score(ref_mask) > 0.90
+        # assert self.check_mask_area(ref_mask) == True
+        # assert self.check_mask_area(tar_mask)  == True
 
         # ========= Reference ===========
         '''
@@ -125,7 +140,7 @@ class BaseDataset(Dataset):
 
         # Get the outline Box of the reference image
         ref_box_yyxx = get_bbox_from_mask(ref_mask)
-        assert self.check_region_size(ref_mask, ref_box_yyxx, ratio = 0.10, mode = 'min') == True
+        # assert self.check_region_size(ref_mask, ref_box_yyxx, ratio = 0.10, mode = 'min') == True
         
         # Filtering background for the reference image
         ref_mask_3 = np.stack([ref_mask,ref_mask,ref_mask],-1)
@@ -161,10 +176,10 @@ class BaseDataset(Dataset):
         # ========= Training Target ===========
         tar_box_yyxx = get_bbox_from_mask(tar_mask)
         tar_box_yyxx = expand_bbox(tar_mask, tar_box_yyxx, ratio=[1.1,1.2]) #1.1  1.3
-        assert self.check_region_size(tar_mask, tar_box_yyxx, ratio = max_ratio, mode = 'max') == True
+        # assert self.check_region_size(tar_mask, tar_box_yyxx, ratio = max_ratio, mode = 'max') == True
         
         # Cropping around the target object 
-        tar_box_yyxx_crop =  expand_bbox(tar_image, tar_box_yyxx, ratio=[1.3, 3.0])   
+        tar_box_yyxx_crop =  expand_bbox(tar_image, tar_box_yyxx, ratio=crop_ratio)   
         tar_box_yyxx_crop = box2squre(tar_image, tar_box_yyxx_crop) # crop box
         y1,y2,x1,x2 = tar_box_yyxx_crop
         cropped_target_image = tar_image[y1:y2,x1:x2,:]
