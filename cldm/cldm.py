@@ -1,4 +1,6 @@
 import einops
+import cv2
+import numpy as np
 import torch
 import torch as th
 import torch.nn as nn
@@ -16,6 +18,7 @@ from ldm.modules.diffusionmodules.openaimodel import UNetModel, TimestepEmbedSeq
 from ldm.models.diffusion.ddpm import LatentDiffusion
 from ldm.util import log_txt_as_img, exists, instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
+from ldm.data.util import draw_contour
 
 
 class ControlledUnetModel(UNetModel):
@@ -360,14 +363,17 @@ class ControlLDM(LatentDiffusion):
         log["reconstruction"] = self.decode_first_stage(z) 
 
         # ==== visualize the shape mask or the high-frequency map ====
-        guide_mask = (c_cat[:,-1,:,:].unsqueeze(1) + 1) * 0.5
-        guide_mask = torch.cat([guide_mask,guide_mask,guide_mask],1)
-        HF_map  = c_cat[:,:3,:,:] #* 2.0 - 1.0
+        guide_mask = ((c_cat[:,-1,:,:].unsqueeze(1) + 1) * 0.5).detach().cpu().numpy()
+        guide_mask = (guide_mask == 1).astype(np.uint8)
 
-        log["control"] = HF_map
+        HF_map  = c_cat[:,:3,:,:].detach().cpu().numpy() #* 2.0 - 1.0
+        target_image = batch["jpg"][:N].detach().cpu().numpy().transpose(0, 3, 1, 2)
 
-        cond_image = batch[self.cond_stage_key].cpu().numpy().copy() 
-        log["conditioning"] = torch.permute( torch.tensor(cond_image), (0,3,1,2)) * 2.0 - 1.0  
+        cond_image = batch[self.cond_stage_key].clone()[:N]
+        cond_image = torch.permute(torch.tensor(cond_image), (0,3,1,2)) * 2.0 - 1.0
+        cond_image = F.interpolate(cond_image, size=(512, 512), mode='bilinear', align_corners=False)
+        cond_image = cond_image.detach().cpu().numpy()
+
         if plot_diffusion_rows:
             # get diffusion row
             diffusion_row = list()
@@ -392,7 +398,7 @@ class ControlLDM(LatentDiffusion):
                                                      batch_size=N, ddim=use_ddim,
                                                      ddim_steps=ddim_steps, eta=ddim_eta)
             x_samples = self.decode_first_stage(samples)
-            log["samples"] = x_samples
+            # log["samples"] = x_samples
             if plot_denoise_rows:
                 denoise_grid = self._get_denoise_row_from_list(z_denoise_row)
                 log["denoise_row"] = denoise_grid
@@ -407,8 +413,15 @@ class ControlLDM(LatentDiffusion):
                                              unconditional_guidance_scale=unconditional_guidance_scale,
                                              unconditional_conditioning=uc_full,
                                              )
-            x_samples_cfg = self.decode_first_stage(samples_cfg)
-            log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}"] = x_samples_cfg #* 2.0 - 1.0
+            x_samples_cfg = self.decode_first_stage(samples_cfg).detach().cpu().numpy()
+            # log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}"] = x_samples_cfg #* 2.0 - 1.0
+
+        # draw the contours of the guide_mask orignal and predicted
+        x_samples_cfg = draw_contour(x_samples_cfg, guide_mask)
+        HF_map = draw_contour(HF_map, guide_mask)
+        target_image = draw_contour(target_image, guide_mask)
+        log["samples"] = torch.from_numpy(np.concatenate([HF_map, cond_image, x_samples_cfg, target_image], axis=2))
+        
         return log
 
     @torch.no_grad()
