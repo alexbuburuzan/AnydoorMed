@@ -451,7 +451,7 @@ class Model(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
-                 attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
+                 attn_resolutions, medical_adapter=False, dropout=0.0, resamp_with_conv=True, in_channels,
                  resolution, z_channels, double_z=True, use_linear_attn=False, attn_type="vanilla",
                  **ignore_kwargs):
         super().__init__()
@@ -462,9 +462,25 @@ class Encoder(nn.Module):
         self.num_res_blocks = num_res_blocks
         self.resolution = resolution
         self.in_channels = in_channels
+        self.medical_adapter = medical_adapter
 
         # downsampling
-        self.conv_in = torch.nn.Conv2d(in_channels,
+        if self.medical_adapter:
+            self.conv_in_medical = torch.nn.Conv2d(in_channels,
+                                                  self.ch,
+                                                  kernel_size=3,
+                                                  stride=1,
+                                                  padding=1)
+            self.res_block_medical1 = ResnetBlock(in_channels=self.ch,
+                                                  out_channels=self.ch,
+                                                  temb_channels=self.temb_ch,
+                                                  dropout=dropout)
+            self.res_block_medical2 = ResnetBlock(in_channels=self.ch,
+                                                  out_channels=self.ch,
+                                                  temb_channels=self.temb_ch,
+                                                  dropout=dropout)
+        else:
+            self.conv_in = torch.nn.Conv2d(in_channels,
                                        self.ch,
                                        kernel_size=3,
                                        stride=1,
@@ -518,9 +534,19 @@ class Encoder(nn.Module):
     def forward(self, x):
         # timestep embedding
         temb = None
+        hs = []
 
+        if self.medical_adapter:
+            x = self.conv_in_medical(x)
+            hs.append(x)
+            x = self.res_block_medical1(x, temb)
+            hs.append(x)
+            x = self.res_block_medical2(x, temb)
+            hs.append(x)
+        else:
+            hs.append(self.conv_in(x))
+            
         # downsampling
-        hs = [self.conv_in(x)]
         for i_level in range(self.num_resolutions):
             for i_block in range(self.num_res_blocks):
                 h = self.down[i_level].block[i_block](hs[-1], temb)
@@ -545,7 +571,7 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
     def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
-                 attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
+                 attn_resolutions, medical_adapter=False, dropout=0.0, resamp_with_conv=True, in_channels,
                  resolution, z_channels, give_pre_end=False, tanh_out=False, use_linear_attn=False,
                  attn_type="vanilla", **ignorekwargs):
         super().__init__()
@@ -558,6 +584,7 @@ class Decoder(nn.Module):
         self.in_channels = in_channels
         self.give_pre_end = give_pre_end
         self.tanh_out = tanh_out
+        self.medical_adapter = medical_adapter
 
         # compute in_ch_mult, block_in and curr_res at lowest res
         in_ch_mult = (1,)+tuple(ch_mult)
@@ -609,12 +636,28 @@ class Decoder(nn.Module):
             self.up.insert(0, up) # prepend to get consistent order
 
         # end
-        self.norm_out = Normalize(block_in)
-        self.conv_out = torch.nn.Conv2d(block_in,
-                                        out_ch,
-                                        kernel_size=3,
-                                        stride=1,
-                                        padding=1)
+        if self.medical_adapter:
+            self.res_block_medical1 = ResnetBlock(in_channels=block_in,
+                                                  out_channels=block_in,
+                                                  temb_channels=self.temb_ch,
+                                                  dropout=dropout)
+            self.res_block_medical2 = ResnetBlock(in_channels=block_in,
+                                                  out_channels=block_in,
+                                                  temb_channels=self.temb_ch,
+                                                  dropout=dropout)    
+            self.norm_out_medical = Normalize(block_in)
+            self.conv_out_medical = torch.nn.Conv2d(block_in,
+                                                    out_ch,
+                                                    kernel_size=3,
+                                                    stride=1,
+                                                    padding=1)
+        else:
+            self.norm_out = Normalize(block_in)
+            self.conv_out = torch.nn.Conv2d(block_in,
+                                            out_ch,
+                                            kernel_size=3,
+                                            stride=1,
+                                            padding=1)
 
     def forward(self, z):
         #assert z.shape[1:] == self.z_shape[1:]
@@ -644,9 +687,18 @@ class Decoder(nn.Module):
         if self.give_pre_end:
             return h
 
-        h = self.norm_out(h)
-        h = nonlinearity(h)
-        h = self.conv_out(h)
+        if self.medical_adapter:
+            h = self.res_block_medical1(h, temb)
+            h = self.res_block_medical2(h, temb)
+
+            h = self.norm_out_medical(h)
+            h = nonlinearity(h)
+            h = self.conv_out_medical(h)
+        else:
+            h = self.norm_out(h)
+            h = nonlinearity(h)
+            h = self.conv_out(h)
+
         if self.tanh_out:
             h = torch.tanh(h)
         return h

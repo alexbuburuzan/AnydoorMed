@@ -26,6 +26,7 @@ class AutoencoderKL(pl.LightningModule):
         super().__init__()
         self.learn_logvar = learn_logvar
         self.image_key = image_key
+        self.in_channels = ddconfig["in_channels"]
         self.encoder = Encoder(**ddconfig)
         self.decoder = Decoder(**ddconfig)
         self.loss = instantiate_from_config(lossconfig)
@@ -101,6 +102,8 @@ class AutoencoderKL(pl.LightningModule):
 
     def get_input(self, batch, k):
         x = batch[k]
+        if self.in_channels == 1:
+            x = x[..., 0]
         if len(x.shape) == 3:
             x = x[..., None]
         x = x.permute(0, 3, 1, 2).to(memory_format=torch.contiguous_format).float()
@@ -149,19 +152,26 @@ class AutoencoderKL(pl.LightningModule):
 
     def configure_optimizers(self):
         lr = self.learning_rate
-        ae_params_list = list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(
-            self.quant_conv.parameters()) + list(self.post_quant_conv.parameters())
-        if self.learn_logvar:
-            print(f"{self.__class__.__name__}: Learning logvar")
-            ae_params_list.append(self.loss.logvar)
-        opt_ae = torch.optim.Adam(ae_params_list,
-                                  lr=lr, betas=(0.5, 0.9))
-        opt_disc = torch.optim.Adam(self.loss.discriminator.parameters(),
-                                    lr=lr, betas=(0.5, 0.9))
+
+        adapter_params = []
+        for name, param in self.named_parameters():
+            if "medical" in name:
+                param.requires_grad = True
+                adapter_params.append(param)
+            elif "discriminator" in name:
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+
+        opt_ae = torch.optim.Adam(adapter_params, lr=lr, betas=(0.5, 0.9))
+        opt_disc = torch.optim.Adam(self.loss.discriminator.parameters(), lr=lr, betas=(0.5, 0.9))
         return [opt_ae, opt_disc], []
 
     def get_last_layer(self):
-        return self.decoder.conv_out.weight
+        if hasattr(self.decoder, "conv_out"):
+            return self.decoder.conv_out.weight
+        else:
+            return self.decoder.conv_out_medical.weight
 
     @torch.no_grad()
     def log_images(self, batch, only_inputs=False, log_ema=False, **kwargs):

@@ -3,7 +3,6 @@ num_workers_per_gpu: 8
 image_size: 512
 
 model:
-  base_learning_rate: 2.0e-05
   target: cldm.cldm.ControlLDM
   params:
     linear_start: 0.00085
@@ -27,7 +26,7 @@ model:
     control_stage_config:
       target: cldm.cldm.ControlNet
       params:
-        use_checkpoint: False
+        use_checkpoint: Treu
         image_size: 32 # unused
         in_channels: 4 
         hint_channels: 4 #3
@@ -45,7 +44,7 @@ model:
     unet_config:
       target: cldm.cldm.ControlledUnetModel
       params:
-        use_checkpoint: False
+        use_checkpoint: True
         image_size: 32 # unused
         in_channels: 4
         out_channels: 4
@@ -65,17 +64,13 @@ model:
       params:
         embed_dim: 4
         monitor: val/rec_loss
-        ckpt_path: "checkpoints/autoencoder/vae_mammo_0.13rec.ckpt"
-        image_key: "jpg"
-
         ddconfig:
           #attn_type: "vanilla-xformers"
-          medical_adapter: true
           double_z: true
           z_channels: 4
-          resolution: ${image_size}
-          in_channels: 1
-          out_ch: 1
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
           ch: 128
           ch_mult:
           - 1
@@ -106,7 +101,8 @@ data:
         split: train
         image_size: ${image_size}
         aug_ref: True
-        random_erase_prob: 0
+        random_erase_prob: 0.5
+        channels: 3
 
     validation:
       target: datasets.vindr_mammo.VindrMammoDataset
@@ -117,6 +113,7 @@ data:
         image_size: ${image_size}
         aug_ref: True
         random_erase_prob: 0
+        channels: 3
 
     test:
       target: datasets.vindr_mammo.VindrMammoDataset
@@ -127,6 +124,7 @@ data:
         image_size: ${image_size}
         aug_ref: False
         random_erase_prob: 0
+        channels: 3
         anomaly_type: "replace"
 
 lightning:

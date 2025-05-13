@@ -287,7 +287,10 @@ class ControlNet(nn.Module):
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
         emb = self.time_embed(t_emb) # 1,1280
         
-        # 1,320,64,64
+        # Original hint shape for medical image: B, 2, 512, 512
+        # Target shape: B, 4, 512, 512 with channels [first, first, first, second]
+        if hint.shape[1] == 2: hint = torch.cat([hint[:, [0]], hint[:, [0]], hint[:, [0]], hint[:, [1]]], dim=1)
+        
         guided_hint = self.input_hint_block(hint, emb, context)
         outs = []
 
@@ -309,12 +312,13 @@ class ControlNet(nn.Module):
 
 class ControlLDM(LatentDiffusion):
 
-    def __init__(self, control_stage_config, control_key, only_mid_control, *args, **kwargs):
+    def __init__(self, control_stage_config, control_key, only_mid_control, sd_locked, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.control_model = instantiate_from_config(control_stage_config)
         self.control_key = control_key
         self.only_mid_control = only_mid_control
         self.control_scales = [1.0] * 13
+        self.sd_locked = sd_locked
 
     @torch.no_grad()
     def get_input(self, batch, k, bs=None, *args, **kwargs):
@@ -366,8 +370,11 @@ class ControlLDM(LatentDiffusion):
         guide_mask = ((c_cat[:,-1,:,:].unsqueeze(1) + 1) * 0.5).detach().cpu().numpy()
         guide_mask = (guide_mask == 1).astype(np.uint8)
 
-        HF_map  = c_cat[:,:3,:,:].detach().cpu().numpy() #* 2.0 - 1.0
+        HF_map  = c_cat[:,:-1,:,:].detach().cpu().numpy() #* 2.0 - 1.0
+        if HF_map.shape[1] == 1: HF_map = np.repeat(HF_map, 3, axis=1)
+
         target_image = batch["jpg"][:N].detach().cpu().numpy().transpose(0, 3, 1, 2)
+        if target_image.shape[1] == 1: target_image = np.repeat(target_image, 3, axis=1)
 
         cond_image = batch[self.cond_stage_key].clone()[:N]
         cond_image = torch.permute(torch.tensor(cond_image), (0,3,1,2)) * 2.0 - 1.0
@@ -414,6 +421,7 @@ class ControlLDM(LatentDiffusion):
                                              unconditional_conditioning=uc_full,
                                              )
             x_samples_cfg = self.decode_first_stage(samples_cfg).detach().cpu().numpy()
+            if x_samples_cfg.shape[1] == 1: x_samples_cfg = np.repeat(x_samples_cfg, 3, axis=1)
             # log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}"] = x_samples_cfg #* 2.0 - 1.0
 
         # draw the contours of the guide_mask orignal and predicted

@@ -32,8 +32,6 @@ def log_txt_as_img(wh, xc, size=10):
     return txts
 
 
-
-
 def ismap(x):
     if not isinstance(x, torch.Tensor):
         return False
@@ -197,3 +195,11 @@ class AdamWwithEMAandWings(optim.Optimizer):
                 ema_param.mul_(cur_ema_decay).add_(param.float(), alpha=1 - cur_ema_decay)
 
         return loss
+
+def move_to_device(batch, device):
+    for k in batch:
+        if isinstance(batch[k], torch.Tensor):
+            batch[k] = batch[k].to(device)
+        elif isinstance(batch[k], dict):
+            batch[k] = move_to_device(batch[k], device)
+    return batch
