@@ -48,7 +48,7 @@ data:
       params:
         image_dir: data/vindr-mammo/png_images/
         anno_path: data/vindr-mammo/finding_annotations.csv
-        split: train
+        split: training
         image_size: ${image_size}
 
     validation:

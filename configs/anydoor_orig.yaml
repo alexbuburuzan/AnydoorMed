@@ -98,10 +98,10 @@ data:
       params:
         image_dir: data/vindr-mammo/png_images/
         anno_path: data/vindr-mammo/finding_annotations.csv
-        split: train
+        split: training
         image_size: ${image_size}
         aug_ref: True
-        random_erase_prob: 0.5
+        random_erase_prob: 0
         channels: 3
 
     validation:

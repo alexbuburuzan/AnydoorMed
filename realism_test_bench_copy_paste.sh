@@ -1,10 +1,5 @@
-#!/bin/bash --login
-#$ -cwd
-#$ -l a100=1
-#$ -pe smp.pe 12
-
 nvidia-smi
-conda activate mobi
+conda activate anydoor_med
 
 RESULTS_BASE_DIR="models/evaluation_results"
 experiments=("poisson_blending")

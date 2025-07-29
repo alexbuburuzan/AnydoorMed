@@ -1,20 +1,15 @@
-#!/bin/bash --login
-#$ -cwd
-#$ -l a100=1
-#$ -pe smp.pe 12
-
 nvidia-smi
-conda activate mobi
+conda activate anydoor_med
 
 # Define base directory for results
 RESULTS_BASE_DIR="models/final_results"
 
 # Define experiment types
-# experiments=("vanilla_inpainting" "lr_ablations")
-experiments=("lr_ablations_other")
+experiments=("multiple_seeds")
 
 # Define anomaly types
-anomaly_types=("insert" "replace")
+anomaly_types=("reinsert")
+# anomaly_types=("insert" "reinsert" "replace")
 
 # Initialize result table function
 initialize_results_table() {

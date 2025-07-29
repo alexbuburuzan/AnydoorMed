@@ -1,10 +1,5 @@
-#!/bin/bash --login
-#$ -cwd
-#$ -l a100=1
-#$ -pe smp.pe 12
-
 nvidia-smi
-conda activate mobi
+conda activate anydoor_med
 
 # Define base directory for results
 RESULTS_BASE_DIR="models/final_results"
